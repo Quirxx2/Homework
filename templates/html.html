@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Formatted RSS News</title>
+</head>
+<body>
+<main>
+    {% for feed in feeds %}
+        <h1>{{ feed['title'] }}</h1>
+        <h1>{{ feed['description'] }}</h1>
+        <h1>{{ feed['pubDate'] }}</h1>
+            {% for item in feed['items'] %}
+                <h2>{{ item['title'] }}</h2>
+                <h2>{{ item['description'] }}</h2>
+                <h2>{{ item['pubDate'] }}</h2>
+                <p><a href="{{ item['link'] }}"></a></p>
+                <p>{{ item.content }}</p>
+                <img src={{ item['image'] }} alt="feed_image" style="max-width:300px;width:100%;border:0"/>
+            {% endfor %}
+    {% endfor %}
+</main>
+</body>
+</html>

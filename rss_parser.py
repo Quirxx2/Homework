@@ -6,6 +6,8 @@ import logging
 from datetime import datetime
 import hashlib
 import os
+from jinja2 import Template
+import pdfkit
 
 import requests
 from bs4 import BeautifulSoup
@@ -18,7 +20,7 @@ class RssParser:
         parser = argparse.ArgumentParser(prog="rss_reader.py",
                                          description='Pure Python command-line RSS reader.')
         parser.add_argument('source', nargs='*', default=None, help="RSS URL")
-        parser.add_argument('--version', action="version", version="RSS parser ver. 3.0",
+        parser.add_argument('--version', action="version", version="RSS parser ver. 4.0",
                             help="Print version info")
         parser.add_argument('--json', action="store_true", help="Print result as JSON in stdout")
         parser.add_argument('--verbose', action="store_true", help="Outputs verbose status messages")
@@ -28,6 +30,14 @@ class RssParser:
                             dest='news_date',
                             help="Save RSS in a local storage",
                             type=lambda data_s: datetime.strptime(data_s, '%Y%m%d'))
+        parser.add_argument('--to-html', dest='html_path',
+                            type=str,
+                            help="Convert rss feed into html and save as file",
+                            metavar="FILE")
+        parser.add_argument('--to-pdf', dest='pdf_path',
+                            type=str,
+                            help="Convert rss feed into pdf and save as file",
+                            metavar="FILE")
 
         self.args = parser.parse_args()
 
@@ -58,7 +68,7 @@ class RssParser:
             response_page.raise_for_status()
             logging.info('HTML data has been downloaded successfully')
         except Exception as e:
-            logging.error(f'Download failed with {e}')
+            logging.error(f'Download of HTML data failed with {e}')
             sys.exit(1)
 
         soup_page = BeautifulSoup(response_page.text, 'html.parser')
@@ -97,7 +107,6 @@ class RssParser:
         # Processing RSS data into dictionary
         soup = BeautifulSoup(response.text, features='xml')
         # Head
-        news = dict()
         try:
             if soup.find('channel') is None:
                 logging.info(f'RSS channel was detected')
@@ -140,9 +149,13 @@ class RssParser:
                 logging.warning('RSS channel description name was not detected. Using current date and time')
                 datepub = datetime.now().strftime("%a, %d %B %Y %I:%M:%S")
         logging.info(f'{datepub} is pubDate')
-        news['channel'] = {'title': title, 'description': desc, 'pubDate': datepub}
+        news2 = {'title': title,
+                 'description': desc,
+                 'pubDate': datepub,
+                 'items': list()}
+        logging.debug(f'{news2}')
         # Tail
-        i = -1
+        feeds = dict()
         try:
             items = soup.findAll('item')
             for i in range(len(items)):
@@ -161,46 +174,53 @@ class RssParser:
                         content = self.get_content_from_html(link)
                     else:
                         content = ''
-                news[f'news {i + 1}'] = {"title": title,
-                                         "pubDate": pubdate,
-                                         "image": image,
-                                         "description": desc,
-                                         "link": link,
-                                         "content": content}
+                    logging.info('Content checked')
+                feeds[f'{i + 1}'] = {"id": i + 1,
+                                     "title": title,
+                                     "pubDate": pubdate,
+                                     "image": image,
+                                     "description": desc,
+                                     "link": link,
+                                     "content": content}
+                logging.debug('News assigned')
+                news2['items'].append(feeds[f'{i + 1}'])
                 logging.info(f'{i + 1} news have been fetched')
-            return news
+            return news2
         except Exception as e:
-            logging.warning(f'Something went wrong. Only {i + 1} news have been found. {e} occured')
+            logging.warning(f'Something went wrong. Not all news have been found. {e} occurred')
             return None
 
     @staticmethod
     def print_to_stdout(rss_data):
         logging.info('Formatting data to plain text')
-        print(rss_data['channel']['title'])
-        if rss_data['channel']['description']:
-            print(rss_data['channel']['description'])
+        if rss_data['title']:
+            print(rss_data['title'])
+        if rss_data['description']:
+            print(rss_data['description'])
         print()
-        for item in rss_data:
-            if item.startswith('news'):
-                link_count = 1
-                if rss_data[item]['title'] != '':
-                    print(f"Title: {rss_data[item]['title']}")
-                if rss_data[item]['description'] != '':
-                    print(f"Description: {rss_data[item]['description']}")
-                if rss_data[item]['link'] != '':
-                    print(f"Link: {rss_data[item]['link']}")
-                if rss_data[item]['pubDate'] != '':
-                    print(f"Date: {rss_data[item]['pubDate']}")
-                print()
-                if rss_data[item]['content'] != '':
-                    print(rss_data[item]['content'])
-                print('\nLinks:')
-                if rss_data[item]['link'] != '':
-                    print(f"[{link_count}]: {rss_data[item]['link']} (link)")
-                    link_count += 1
-                if rss_data[item]['image'] != '':
-                    print(f"[{link_count}]: {rss_data[item]['image']} (image)")
-                print()
+        j = 1
+        for feeds in rss_data['items']:
+            link_count = 1
+            if feeds['title'] != '':
+                print(f"Title: {feeds['title']}")
+            if feeds['description'] != '':
+                print(f"Description: {feeds['description']}")
+            if feeds['link'] != '':
+                print(f"Link: {feeds['link']}")
+            if feeds['pubDate'] != '':
+                print(f"Date: {feeds['pubDate']}")
+            print()
+
+            if feeds['content'] != '':
+                print(feeds['content'])
+            print('\nLinks:')
+            if feeds['link'] != '':
+                print(f"[{link_count}]: {feeds['link']} (link)")
+                link_count += 1
+            if feeds['image'] != '':
+                print(f"[{link_count}]: {feeds['image']} (image)")
+            print()
+            j += 1
 
     @staticmethod
     def print_to_stdout_as_json(rss_data):
@@ -212,11 +232,11 @@ class RssParser:
     def short_date(date_string):
         try:
             logging.info(f'{date_string} is a parsed pubDate')
-            ds = datetime.strptime(date_string, "%a, %d %b %Y %I:%M:%S")
-            tds = ds.timetuple()
+            ds = datetime.strptime(date_string, "%a, %d %b %Y %H:%M:%S")
         except ValueError:
-            ds = datetime.strptime(date_string, "%a, %d %B %Y %I:%M:%S")
-            tds = ds.timetuple()
+            logging.debug('Second chance to parse pubDate')
+            ds = datetime.strptime(date_string, "%a, %d %B  %Y %H:%M:%S")
+        tds = ds.timetuple()
         logging.info(f'Head of file name is {str(tds[0]) + str(tds[1]) + str(tds[2])}')
         return str(tds[0]) + str(tds[1]) + str(tds[2])
 
@@ -262,9 +282,8 @@ class RssParser:
                                 # Truncating data to LIMIT
                                 if (f_data[index] is not None) \
                                         and (self.args.LIMIT != -1) \
-                                        and (self.args.LIMIT < (len(f_data[index]) - 1)):
-                                    for key in range(self.args.LIMIT + 1, len(f_data[index])):
-                                        del f_data[index][f'news {key}']
+                                        and (self.args.LIMIT < (len(f_data[index]['items']))):
+                                    del f_data[index]['items'][self.args.LIMIT:]
                                 c_body.append(f_data[index])
             return c_body
 
@@ -279,9 +298,8 @@ class RssParser:
             # Truncating data to LIMIT
             if (f_data is not None) \
                     and (self.args.LIMIT != -1) \
-                    and (self.args.LIMIT < (len(f_data) - 1)):
-                for key in range(self.args.LIMIT + 1, len(f_data)):
-                    del f_data[f'news {key}']
+                    and (self.args.LIMIT < (len(f_data['items']))):
+                del f_data['items'][self.args.LIMIT:]
             c_body.append(f_data)
             return c_body
 
@@ -289,7 +307,7 @@ class RssParser:
             # There is only a source of data. Fetch news from the source and put them to a local storage
             # As well make them available to print
             rss_news = self.read_rss_from_url()
-            file_head = self.short_date(rss_news['channel']['pubDate'])
+            file_head = self.short_date(rss_news['pubDate'])
             file_tail = self.hash_name(self.args.source[0])
             file_body = file_head + ' ' + file_tail + '.json'
             # Updating file with news if exists. Old data will be erased. Otherwise creating new one
@@ -297,6 +315,31 @@ class RssParser:
                 self.write_to_json(f, rss_news)
             c_body.append(rss_news)
             return c_body
+
+    @staticmethod
+    def convert_to_html(path, news_data: list):
+        logging.debug('Creating HTML file/content')
+        html_content = Template(open(os.path.join(os.path.dirname(__file__),
+                                                  "templates",
+                                                  "html.html")).read()).render(feeds=news_data)
+        logging.debug('HTML content has been created')
+        if path is not None:
+            with open(path + 'output.html', "w", encoding="UTF-8") as f:
+                f.write(html_content)
+                logging.debug("HTML file 'output.html' has been created")
+        else:
+            return html_content
+
+    def convert_to_pdf(self, path, news_data: list):
+        logging.debug('Creating PDF file')
+        try:
+            pdf_content = pdfkit.from_string(self.convert_to_html(None, news_data), output_path=False)
+        except Exception as e:
+            raise ConvertationError(f'{e} occurred. Try to install "wkhtmltopdf"')
+        logging.debug('PDF content has been created')
+        with open(path + 'output.pdf', "w+b", encoding=None) as f:
+            f.write(pdf_content)
+        logging.debug("PDF file 'output.pdf' has been created")
 
 
 if __name__ == '__main__':
@@ -310,12 +353,19 @@ if __name__ == '__main__':
     if cashed_news is None:
         raise Exception('News were not found')
 
-    logging.info('Printing information')
+    logging.info('Printing data')
 
     for news in cashed_news:
         if rss.args.json:
             rss.print_to_stdout_as_json(news)
         else:
             rss.print_to_stdout(news)
+
+    logging.info('Converting data')
+
+    if rss.args.html_path is not None:
+        rss.convert_to_html(rss.args.html_path, cashed_news)
+    if rss.args.pdf_path is not None:
+        rss.convert_to_pdf(rss.args.pdf_path, cashed_news)
 
     logging.info("Program finished successfully")
