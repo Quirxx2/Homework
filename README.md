@@ -65,6 +65,8 @@ Following structure as an example:
             "links": []
         }
 
-Testing
+Testing / Known Issues
 
-Script tested manually
+news_cashing function doesn't work properly
+
+
