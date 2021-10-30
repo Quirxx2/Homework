@@ -1,0 +1,27 @@
+{
+    "title": "Feed: 1",
+    "description": "Desc",
+    "pubDate": "Sat, 30 Oct 2021 06:01:09",
+    "items": [
+        {
+            "id": 1,
+            "title": "Subtitle 1",
+            "pubDate": "Sat, 30 Oct 2021 02:12:00 GMT",
+            "image": "",
+            "description": "Desc1",
+            "link": "https://www.dw.com/",
+            "content": "100\n",
+            "links": []
+        },
+        {
+            "id": 2,
+            "title": "Subtitle 2",
+            "pubDate": "Fri, 29 Oct 2021 23:20:00 GMT",
+            "image": "",
+            "description": "Desc2",
+            "link": "https://www.dw.com/",
+            "content": "200\n",
+            "links": []
+        },
+            ]
+}
