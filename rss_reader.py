@@ -1,11 +1,11 @@
 import json
-import re
 import argparse
 import sys
 import logging
 from datetime import datetime
 import hashlib
 import os
+from pathlib import Path
 from jinja2 import Template
 import pdfkit
 
@@ -61,7 +61,8 @@ class RssParser:
                                 format="%(levelname)s: %(message)s")
 
     @staticmethod
-    def get_content_from_html(url):
+    def get_content_from_html(url, description):
+
         # Requesting html data
         try:
             response_page = requests.get(url)
@@ -80,19 +81,61 @@ class RssParser:
             if p_node.parent.name == 'div':
                 max_words = 0
                 temp_text = p_node.text + '\n'
+                if description != '':
+                    len_d = min(len(description), 50)
+                    ind = temp_text.find(description[:len_d])
+                    if ind != -1:
+                        # This is the beginning of the block_
+                        item_page.clear()
+                        temp_text = temp_text[ind:]
                 item_page.append(temp_text)
                 other_nodes = p_node.next_siblings
                 for other_node in other_nodes:
                     if other_node.name == 'p':
                         temp_text = other_node.text + '\n'
+                        if description != '':
+                            len_d = min(len(description), 50)
+                            ind = temp_text.find(description[:len_d])
+                            if ind != -1:
+                                # This is the beginning of the block_
+                                item_page.clear()
+                                temp_text = temp_text[ind:]
                         item_page.append(temp_text)
                 for item in item_page:
-                    max_words = max_words + len(re.findall(r'\w+', item))
+                    max_words = max_words + len(item.split())
+                # Find first block big enough to be a news content
                 if max_words > 30:
                     logging.info('HTML text has been found')
                     return ''.join(item_page)
         logging.info('HTML text has not been found')
         return ''
+
+    @staticmethod
+    def split_desc(bc):
+
+        tag_names = {
+            'img': {'attr': 'src', 'type': 'image', 'alt_text': 'alt'},
+            'a': {'attr': 'href', 'type': 'link', 'alt_text': ''}
+        }
+
+        logging.info('Swapping references')
+        links = []
+        for tag in bc.find_all():
+            if tag.attrs and not tag.find_all():
+                url = tag.attrs.get(tag_names.get(tag.name, {}).get("attr", ""))
+                if url:
+                    links.append({
+                        "ref": url,
+                        "type": tag_names.get(tag.name)['type']
+                    })
+                    alt = tag.text or tag.attrs.get(tag_names.get(tag.name)["alt_text"], "")
+                    tag.replace_with(f'{alt}'.strip())
+            tag.smooth()
+        text = bc.text
+        return {
+            "desc_text": text,
+            "desc_links": links
+        }
 
     def read_rss_from_url(self):
         # Requesting RSS data
@@ -136,18 +179,7 @@ class RssParser:
             datepub = datepub[:i_pub]
         except AttributeError:
             logging.info('RSS channel description name was not detected')
-            datepub = ''
-        if datepub == '':
-            try:
-                date_tag = soup.find('channel').find('lastBuildDate')
-                logging.info(f'RSS channel date "{date_tag.text}" was detected')
-                datepub = date_tag.text
-                # Removing timezone info
-                i_pub = datepub.rfind(' ')
-                datepub = datepub[:i_pub]
-            except AttributeError:
-                logging.warning('RSS channel description name was not detected. Using current date and time')
-                datepub = datetime.now().strftime("%a, %d %B %Y %I:%M:%S")
+            datepub = datetime.now().strftime("%a, %d %B %Y %I:%M:%S")
         logging.info(f'{datepub} is pubDate')
         news2 = {'title': title,
                  'description': desc,
@@ -164,14 +196,22 @@ class RssParser:
                     break
                 else:
                     title = "" if items[i].title is None else items[i].title.text
-                    desc = "" if items[i].description is None else items[i].description.text
+                    # Check description for availability and having additional links and images
+                    if items[i].description is not None:
+                        dc = BeautifulSoup(items[i].description.get_text(strip=True), features="html.parser")
+                        desc_object = self.split_desc(dc)
+                        desc = desc_object['desc_text']
+                        links = desc_object['desc_links']
+                    else:
+                        desc = ''
+                        links = list()
                     link = "" if items[i].link is None else items[i].link.text
                     pubdate = "" if items[i].pubDate is None else items[i].pubDate.text
-                    image_x = items[i].find("media:content", attrs={"url": True})
+                    image_x = items[i].find('media:content', attrs={'url': True})
                     image = "" if image_x is None else image_x['url']
                     # if there is a link to outer page it needs to open and grab a content
                     if link != '':
-                        content = self.get_content_from_html(link)
+                        content = self.get_content_from_html(link, desc)
                     else:
                         content = ''
                     logging.info('Content checked')
@@ -181,7 +221,8 @@ class RssParser:
                                      "image": image,
                                      "description": desc,
                                      "link": link,
-                                     "content": content}
+                                     "content": content,
+                                     "links": links}
                 logging.debug('News assigned')
                 news2['items'].append(feeds[f'{i + 1}'])
                 logging.info(f'{i + 1} news have been fetched')
@@ -198,7 +239,6 @@ class RssParser:
         if rss_data['description']:
             print(rss_data['description'])
         print()
-        j = 1
         for feeds in rss_data['items']:
             link_count = 1
             if feeds['title'] != '':
@@ -219,8 +259,12 @@ class RssParser:
                 link_count += 1
             if feeds['image'] != '':
                 print(f"[{link_count}]: {feeds['image']} (image)")
+                link_count += 1
+            if len(feeds['links']) != 0:
+                for f in feeds['links']:
+                    print(f"[{link_count}]: {f['ref']} ({f['type']})")
+                    link_count += 1
             print()
-            j += 1
 
     @staticmethod
     def print_to_stdout_as_json(rss_data):
@@ -319,9 +363,10 @@ class RssParser:
     @staticmethod
     def convert_to_html(path, news_data: list):
         logging.debug('Creating HTML file/content')
+        fonts = str(Path(Path(__file__).parent.resolve(), "fonts"))
         html_content = Template(open(os.path.join(os.path.dirname(__file__),
                                                   "templates",
-                                                  "html.html")).read()).render(feeds=news_data)
+                                                  "html.html")).read()).render(feeds=news_data, fonts=fonts)
         logging.debug('HTML content has been created')
         if path is not None:
             with open(path + 'output.html', "w", encoding="UTF-8") as f:
@@ -335,15 +380,14 @@ class RssParser:
         try:
             pdf_content = pdfkit.from_string(self.convert_to_html(None, news_data), output_path=False)
         except Exception as e:
-            raise ConvertationError(f'{e} occurred. Try to install "wkhtmltopdf"')
+            raise Exception(f'{e} occurred. Try to install "wkhtmltopdf"')
         logging.debug('PDF content has been created')
         with open(path + 'output.pdf', "w+b", encoding=None) as f:
             f.write(pdf_content)
         logging.debug("PDF file 'output.pdf' has been created")
 
 
-if __name__ == '__main__':
-
+def main():
     rss = RssParser()
 
     logging.info('Cashing information')
@@ -361,11 +405,16 @@ if __name__ == '__main__':
         else:
             rss.print_to_stdout(news)
 
-    logging.info('Converting data')
-
     if rss.args.html_path is not None:
+        logging.info('Converting data')
         rss.convert_to_html(rss.args.html_path, cashed_news)
     if rss.args.pdf_path is not None:
+        logging.info('Converting data')
         rss.convert_to_pdf(rss.args.pdf_path, cashed_news)
 
     logging.info("Program finished successfully")
+
+
+if __name__ == '__main__':
+
+    main()

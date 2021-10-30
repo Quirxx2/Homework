@@ -3,20 +3,59 @@
 <head>
     <meta charset="UTF-8">
     <title>Formatted RSS News</title>
+    <style>
+        @font-face {
+            font-family: DejaVuSans;
+            src: url("{{ fonts + "\DejaVuSans.ttf" }}");
+        }
+        @font-face {
+            font-family: DejaVuSans;
+            src: url("{{ fonts + "\DejaVuSans-Bold.ttf" }}");
+            font-weight: bold;
+        }
+        body {
+            -pdf-word-wrap: CJK;
+            font-family: DejaVuSans;
+        }
+    </style>
 </head>
 <body>
 <main>
     {% for feed in feeds %}
         <h1>{{ feed['title'] }}</h1>
-        <h1>{{ feed['description'] }}</h1>
         <h1>{{ feed['pubDate'] }}</h1>
+        {% if feed['description'] != '' %}
+            <h2>{{ feed['description'] }}</h2>
+        {% endif %}
             {% for item in feed['items'] %}
-                <h2>{{ item['title'] }}</h2>
-                <h2>{{ item['description'] }}</h2>
-                <h2>{{ item['pubDate'] }}</h2>
-                <p><a href="{{ item['link'] }}"></a></p>
-                <p>{{ item.content }}</p>
-                <img src={{ item['image'] }} alt="feed_image" style="max-width:300px;width:100%;border:0"/>
+                {% if item[title] != '' %}
+                    <h2>{{ item['title'] }}</h2>
+                {% endif %}
+                {% if item['pubDate'] != '' %}
+                    <h2>{{ item['pubDate'] }}</h2>
+                {% endif %}
+                {% if item['description'] != '' %}
+                    <h3>{{ item['description'] }}</h3>
+                {% endif %}
+                {% if item['link'] != '' %}
+                    <p><a href="{{ item['link'] }}">{{ item['link'] }}</a></p>
+                {% endif %}
+                {% if item['content'] != '' %}
+                    <p>{{ item['content'] }}</p>
+                {% endif %}
+                {% if item['image'] != '' %}
+                    <img src={{ item['image'] }} alt="feed_image" style="max-width:300px;width:100%;border:0"/>
+                {% endif %}
+                {% for link in item['links'] %}
+                    {% if link['type'] == 'link' %}
+                        <li><a href={{ link['ref'] }}>{{ link['type'] }}</a></li>
+                    {% endif %}
+                {% endfor %}
+                {% for link in item['links'] %}
+                    {% if link['type'] == 'image' %}
+                        <img src={{ link['ref'] }} alt="feed_image" style="max-width:300px;width:100%;border:0"/>
+                    {% endif %}
+                {% endfor %}
             {% endfor %}
     {% endfor %}
 </main>
